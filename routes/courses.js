@@ -7,55 +7,62 @@ router.post("/", async (req, res) => {
     try {
         const { course, branch, semester, sectionNames, subjects, teachers } = req.body;
 
-        // Insert Course
-        const [courseResult] = await db.query(
-            "INSERT INTO Course (course_name, branch_name, semester) VALUES (?, ?, ?)",
+        // 1️⃣ CHECK IF COURSE ALREADY EXISTS
+        const [existing] = await db.query(
+            "SELECT id FROM Course WHERE course_name = ? AND branch_name = ? AND semester = ?",
             [course, branch, semester]
         );
-        const courseId = courseResult.insertId;
 
-        // Insert Sections
+        let courseId;
+
+        if (existing.length > 0) {
+            // Course already exists → use old ID
+            courseId = existing[0].id;
+        } else {
+            // 2️⃣ INSERT NEW COURSE
+            const [courseResult] = await db.query(
+                "INSERT INTO Course (course_name, branch_name, semester) VALUES (?, ?, ?)",
+                [course, branch, semester]
+            );
+            courseId = courseResult.insertId;
+        }
+
+        // 3️⃣ Clear old sections/subjects/teachers for this course
+        await db.query("DELETE FROM Section WHERE course_id = ?", [courseId]);
+        await db.query("DELETE FROM Subject WHERE course_id = ?", [courseId]);
+        await db.query(`
+            DELETE t FROM Teacher t
+            JOIN TeacherSubject ts ON t.id = ts.teacher_id
+            JOIN Subject s ON s.id = ts.subject_id
+            WHERE s.course_id = ?
+        `, [courseId]);
+        await db.query("DELETE FROM TeacherSubject WHERE subject_id IN (SELECT id FROM Subject WHERE course_id = ?)", [courseId]);
+
+        // 4️⃣ INSERT SECTIONS
         for (let sec of sectionNames) {
             await db.query("INSERT INTO Section (course_id, section_label) VALUES (?, ?)", [courseId, sec]);
         }
 
-        // Insert Subjects
-     // Insert Subjects
-let subjectMap = {};
-for (let sub of subjects) {
+        // 5️⃣ INSERT SUBJECTS
+        let subjectMap = {};
+        for (let sub of subjects) {
+            const [r] = await db.query(
+                "INSERT INTO Subject (course_id, name, code, priority, type) VALUES (?,?,?,?,?)",
+                [courseId, sub.name, sub.code, sub.priority, sub.type]
+            );
+            subjectMap[sub.name] = r.insertId;
+        }
 
-    // 🔥 CHECK FOR DUPLICATE CODE IN SAME COURSE
-    const [existing] = await db.query(
-        "SELECT id FROM Subject WHERE course_id = ? AND code = ?",
-        [courseId, sub.code]
-    );
-
-    if (existing.length > 0) {
-        return res.json({
-            ok: false,
-            error: `Duplicate subject code "${sub.code}" already exists for this course`
-        });
-    }
-
-    // If not duplicate, insert
-    const [r] = await db.query(
-        "INSERT INTO Subject (course_id, name, code, priority, type) VALUES (?,?,?,?,?)",
-        [courseId, sub.name, sub.code, sub.priority, sub.type]
-    );
-    subjectMap[sub.name] = r.insertId;
-}
-
-
-        // Insert Teachers + Mapping
+        // 6️⃣ INSERT TEACHERS + MAPPING
         for (let t of teachers) {
             const [tr] = await db.query("INSERT INTO Teacher (name, email) VALUES (?,?)", [t.name, t.email || ""]);
             const teacherId = tr.insertId;
 
-            for (let subjectName of t.subjects) {
-                if (subjectMap[subjectName]) {
+            for (let s of t.subjects) {
+                if (subjectMap[s]) {
                     await db.query(
                         "INSERT INTO TeacherSubject (teacher_id, subject_id) VALUES (?,?)",
-                        [teacherId, subjectMap[subjectName]]
+                        [teacherId, subjectMap[s]]
                     );
                 }
             }
