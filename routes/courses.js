@@ -153,5 +153,21 @@ if (existingSub.length > 0) {
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
+// =====================
+// ADD THIS ROUTE
+// =====================
+router.get("/", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT id, course_name, branch_name, semester FROM Course"
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
+// DO NOT put anything after this
 module.exports = router;
+
