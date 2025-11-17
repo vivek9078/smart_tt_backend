@@ -65,18 +65,30 @@ router.post("/", async (req, res) => {
       if (!name || !code) continue;
 
       // duplicate code check
-      const [dup] = await conn.query(
-        "SELECT id FROM Subject WHERE course_id=? AND LOWER(code)=LOWER(?)",
-        [courseId, code]
-      );
+     // Check subject with this code already exists
+const [existingSub] = await conn.query(
+  "SELECT id, name FROM Subject WHERE course_id=? AND LOWER(code)=LOWER(?)",
+  [courseId, code]
+);
 
-      if (dup.length > 0) {
-        await conn.rollback();
-        return res.status(400).json({
-          ok: false,
-          error: "This subject code already exists for this course."
-        });
-      }
+if (existingSub.length > 0) {
+  const existingName = existingSub[0].name.trim().toLowerCase();
+  const incomingName = name.trim().toLowerCase();
+
+  // SAME subject (same name + same code) → allowed, NOT duplicate
+  if (existingName === incomingName) {
+    subjectIdMap[name] = existingSub[0].id;
+    continue; // skip insertion
+  }
+
+  // DIFFERENT subject but SAME code → REAL duplicate
+  await conn.rollback();
+  return res.status(400).json({
+    ok: false,
+    error: "This subject code already exists for another subject in this course."
+  });
+}
+
 
       const [r] = await conn.query(
         "INSERT INTO Subject (course_id, name, code, priority, type) VALUES (?,?,?,?,?)",
